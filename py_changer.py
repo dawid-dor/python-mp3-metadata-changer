@@ -1,15 +1,19 @@
 # TO DO:
 # 1. Proper data validation
-# 2. Album image changable
+# 2. Album image changable @@done
 # 3. Make GUI look cleaner
 # 3. Make it executable + keep the last opened folder list in cache
 
 import PySimpleGUI as sg
 import eyed3
 import os.path
+import shutil
 import io
 import time
 import threading
+import requests
+import json
+from google_images_download import google_images_download
 
 
 # Class
@@ -20,6 +24,9 @@ class Song:
         self.title = title
         self.album = album
         self.file = eyed3.load(self.path)
+
+    def reset_tags(self):
+        self.file.initTag()
 
     def get_artist(self):
         return self.file.tag.artist
@@ -42,6 +49,11 @@ class Song:
         self.file.tag.title = change_value
         self.file.tag.save()
 
+    def change_album_image(self, change_value):
+        self.file.tag.images.set(3,
+                                 open(change_value, 'rb').read(), 'image/jpeg')
+        self.file.tag.save(version=eyed3.id3.ID3_V2_3)
+
 
 # Functions
 def clear_info():
@@ -52,6 +64,27 @@ def clear_input_fields():
     window['-TITLE-'].update('')
     window['-ARTIST-'].update('')
     window['-ALBUM-'].update('')
+
+
+def get_image_from_google(query):
+    response = google_images_download.googleimagesdownload(
+    )  #class instantiation
+
+    arguments = {
+        "keywords": "{}".format(query),
+        "limit": 1,
+        "print_urls": True
+    }  #creating list of arguments
+    paths = response.download(
+        arguments)  #passing the arguments to the function
+    keyword = query
+    return paths[0][keyword][0]
+
+
+def delete_downloaded_image(file_path):
+    formatted_path = r'%s' % file_path
+    download_folder = os.path.dirname(formatted_path)
+    shutil.rmtree(download_folder)
 
 
 # ----- Full layout -----
@@ -84,7 +117,11 @@ left_col = [
 
 right_col = [[sg.Column(label_col), sg.Column(input_col)],
              [sg.Button('Submit Changes', key='-CHANGE-')],
-             [sg.Text(text='PLACEHOLDER', key='-INFO-', enable_events=True)]]
+             [
+                 sg.Text(text='              ',
+                         key='-INFO-',
+                         enable_events=True)
+             ]]
 
 layout = [[
     sg.Column(left_col, element_justification='c'),
@@ -119,6 +156,8 @@ while True:
         window['-FILE LIST-'].update(fnames)
     elif event == '-FILE LIST-':  # A file was chosen from the listbox
         try:
+            # Clear input fields
+            clear_input_fields()
             # Get filepath from listbox
             filename = os.path.join(values['-FOLDER-'],
                                     values['-FILE LIST-'][0])
@@ -137,16 +176,23 @@ while True:
             print(f'** Error {E} **')
             pass
     elif event == '-CHANGE-':
+        # Set query for web scrapper for album IMG
+        query = values['-TITLE-'] + ' ' + values['-ARTIST-']
+        image_location = get_image_from_google(query)
         # Set new data
+        CURRENT_SONG.reset_tags()
         CURRENT_SONG.change_title(values['-TITLE-'])
         CURRENT_SONG.change_artist(values['-ARTIST-'])
         CURRENT_SONG.change_album(values['-ALBUM-'])
-        # Clear input fields
-        clear_input_fields()
+        CURRENT_SONG.change_album_image(image_location)
         # Confirmation that the operation has been performed sucessfuly
         window['-INFO-'].update('Updated!')
+        # Clear input fields
+        clear_input_fields()
         # Wait 1 second and erase the confirmation
         threading.Timer(1, clear_info).start()
+        # Delete downloaded album image
+        delete_downloaded_image(image_location)
 
 # --------------------------------- Close & Exit ---------------------------------
 window.close()
